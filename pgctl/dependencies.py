@@ -27,7 +27,7 @@ def topological_sort(services, dependency_map):
             return
         if state[name] == IN_PROGRESS:
             raise CircularDependencies(
-                "Circular dependency detected involving service '%s'" % name
+                f"Circular dependency detected involving service '{name}'"
             )
         state[name] = IN_PROGRESS
         for neighbor in adj[name]:
@@ -69,11 +69,11 @@ def resolve_start_order(services, dependency_map, service_by_name_fn=None):
                         service_by_name[dep] = service_by_name_fn(dep)
                     except Exception:
                         raise PgctlUserMessage(
-                            "Service '%s' depends on '%s', but '%s' does not exist" % (name, dep, dep)
+                            f"Service '{name}' depends on '{dep}', but '{dep}' does not exist"
                         )
                 else:
                     raise PgctlUserMessage(
-                        "Service '%s' depends on '%s', but '%s' does not exist" % (name, dep, dep)
+                        f"Service '{name}' depends on '{dep}', but '{dep}' does not exist"
                     )
                 needed.add(dep)
                 queue.append(dep)

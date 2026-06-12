@@ -96,3 +96,17 @@ def it_raises_on_unknown_dependency_without_resolver():
     deps = {'api': ['nonexistent']}
     with pytest.raises(PgctlUserMessage, match="does not exist"):
         resolve_start_order(services, deps)
+
+
+def it_raises_on_nonexistent_service_dependency():
+    """When a dependency references a service that doesn't exist as a directory
+    in the playground, the resolver should raise a clear error message."""
+    services = [FakeService('api')]
+    deps = {'api': ['cache']}
+
+    def resolver_that_checks_path(name):
+        # Simulate what service_by_name does: raise when the path doesn't exist
+        raise KeyError(f"No such service: '{name}'")
+
+    with pytest.raises(PgctlUserMessage, match=r"Service 'api' depends on 'cache', but 'cache' does not exist"):
+        resolve_start_order(services, deps, service_by_name_fn=resolver_that_checks_path)

@@ -22,6 +22,7 @@ from .dependencies import resolve_start_order
 from .errors import CircularAliases
 from .errors import LockHeld
 from .errors import NoPlayground
+from .errors import NoSuchService
 from .errors import PgctlUserMessage
 from .errors import reraise
 from .errors import Unsupervised
@@ -706,11 +707,16 @@ class PgctlApp:
         print(JSONEncoder(sort_keys=True, indent=4).encode(self.pgconf))
 
     def service_by_name(self, service_name):
-        """Return an instantiated Service, by name."""
+        """Return an instantiated Service, by name.
+
+        Raises NoSuchService if the service directory does not exist.
+        """
         if os.path.isabs(service_name):
             path = Path(service_name)
         else:
             path = self.pgdir.join(service_name, abs=1)
+        if not path.check(dir=True):
+            raise NoSuchService(f"No such service: '{service_name}'")
         return Service(
             path=path,
             scratch_dir=self.pghome.join(path.relto('/'), abs=1),
