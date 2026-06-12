@@ -20,14 +20,14 @@ class FakeService:
         return hash(self.name)
 
 
-class TestTopologicalSort:
+class DescribeTopologicalSort:
 
-    def test_no_dependencies(self):
+    def it_handles_no_dependencies(self):
         services = [FakeService('a'), FakeService('b'), FakeService('c')]
         result = topological_sort(services, {})
         assert set(s.name for s in result) == {'a', 'b', 'c'}
 
-    def test_linear_chain(self):
+    def it_sorts_a_linear_chain(self):
         services = [FakeService('db'), FakeService('api'), FakeService('web')]
         deps = {'api': ['db'], 'web': ['api']}
         result = topological_sort(services, deps)
@@ -35,7 +35,7 @@ class TestTopologicalSort:
         assert names.index('db') < names.index('api')
         assert names.index('api') < names.index('web')
 
-    def test_diamond_dependency(self):
+    def it_sorts_a_diamond_dependency(self):
         services = [FakeService('db'), FakeService('cache'), FakeService('api'), FakeService('web')]
         deps = {'api': ['db', 'cache'], 'web': ['api']}
         result = topological_sort(services, deps)
@@ -44,22 +44,22 @@ class TestTopologicalSort:
         assert names.index('cache') < names.index('api')
         assert names.index('api') < names.index('web')
 
-    def test_circular_dependency_raises(self):
+    def it_raises_on_circular_dependency(self):
         services = [FakeService('a'), FakeService('b')]
         deps = {'a': ['b'], 'b': ['a']}
         with pytest.raises(CircularDependencies):
             topological_sort(services, deps)
 
-    def test_dependency_not_in_service_list_is_ignored(self):
+    def it_ignores_dependencies_not_in_service_list(self):
         services = [FakeService('api')]
         deps = {'api': ['db']}
         result = topological_sort(services, deps)
         assert [s.name for s in result] == ['api']
 
 
-class TestResolveStartOrder:
+class DescribeResolveStartOrder:
 
-    def test_simple(self):
+    def it_orders_dependencies_before_dependents(self):
         services = [FakeService('web'), FakeService('api'), FakeService('db')]
         deps = {'api': ['db'], 'web': ['api']}
         result = resolve_start_order(services, deps)
@@ -68,9 +68,9 @@ class TestResolveStartOrder:
         assert names.index('api') < names.index('web')
 
 
-class TestResolveStopOrder:
+class DescribeResolveStopOrder:
 
-    def test_reverse_of_start(self):
+    def it_orders_dependents_before_dependencies(self):
         services = [FakeService('web'), FakeService('api'), FakeService('db')]
         deps = {'api': ['db'], 'web': ['api']}
         result = resolve_stop_order(services, deps)
