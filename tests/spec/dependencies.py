@@ -1,9 +1,9 @@
 import pytest
 
 from pgctl.dependencies import resolve_start_order
-from pgctl.dependencies import resolve_stop_order
 from pgctl.dependencies import topological_sort
 from pgctl.errors import CircularDependencies
+from pgctl.errors import PgctlUserMessage
 
 
 class FakeService:
@@ -68,10 +68,31 @@ def it_orders_dependencies_before_dependents_on_start():
     assert names.index('api') < names.index('web')
 
 
-def it_orders_dependents_before_dependencies_on_stop():
-    services = [FakeService('web'), FakeService('api'), FakeService('db')]
-    deps = {'api': ['db'], 'web': ['api']}
-    result = resolve_stop_order(services, deps)
+def it_pulls_in_transitive_dependencies():
+    services = [FakeService('web')]
+    all_services = {'web': FakeService('web'), 'api': FakeService('api'), 'db': FakeService('db')}
+    deps = {'web': ['api'], 'api': ['db']}
+    result = resolve_start_order(services, deps, service_by_name_fn=lambda n: all_services[n])
     names = [s.name for s in result]
-    assert names.index('web') < names.index('api')
-    assert names.index('api') < names.index('db')
+    assert 'db' in names
+    assert 'api' in names
+    assert names.index('db') < names.index('api')
+    assert names.index('api') < names.index('web')
+
+
+def it_raises_on_unknown_dependency():
+    services = [FakeService('api')]
+    deps = {'api': ['nonexistent']}
+
+    def bad_lookup(name):
+        raise KeyError(name)
+
+    with pytest.raises(PgctlUserMessage, match="does not exist"):
+        resolve_start_order(services, deps, service_by_name_fn=bad_lookup)
+
+
+def it_raises_on_unknown_dependency_without_resolver():
+    services = [FakeService('api')]
+    deps = {'api': ['nonexistent']}
+    with pytest.raises(PgctlUserMessage, match="does not exist"):
+        resolve_start_order(services, deps)

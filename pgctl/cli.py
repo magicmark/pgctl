@@ -19,7 +19,6 @@ from .configsearch import search_parent_directories
 from .debug import debug
 from .debug import trace
 from .dependencies import resolve_start_order
-from .dependencies import resolve_stop_order
 from .errors import CircularAliases
 from .errors import LockHeld
 from .errors import NoPlayground
@@ -541,19 +540,14 @@ class PgctlApp:
         deps = self.pgconf.get('dependencies', {})
         return {k: tuple(v) if isinstance(v, list) else (v,) for k, v in deps.items()}
 
-    def _services_in_start_order(self):
-        return resolve_start_order(self.services, self.dependency_map)
-
-    def _services_in_stop_order(self):
-        return resolve_stop_order(self.services, self.dependency_map)
-
-    def _group_by_dependency_phase(self, ordered_services, reverse=False):
+    def _group_by_dependency_phase(self, ordered_services):
         """Group services into phases where each phase's services have all
         dependencies satisfied by prior phases.
 
         Returns a list of lists of services.
         """
         dep_map = self.dependency_map
+        service_names_in_scope = {s.name for s in ordered_services}
         started = set()
         phases = []
         remaining = list(ordered_services)
@@ -562,7 +556,6 @@ class PgctlApp:
             phase = []
             for service in list(remaining):
                 deps = set(dep_map.get(service.name, ()))
-                service_names_in_scope = {s.name for s in self.services}
                 relevant_deps = deps & service_names_in_scope
                 if relevant_deps <= started:
                     phase.append(service)
@@ -579,7 +572,9 @@ class PgctlApp:
         """Idempotent start of a service or group of services"""
         dep_map = self.dependency_map
         if dep_map:
-            ordered = self._services_in_start_order()
+            ordered = resolve_start_order(
+                self.services, dep_map, self.service_by_name,
+            )
             phases = self._group_by_dependency_phase(ordered)
             all_failed = []
             for phase in phases:
@@ -600,17 +595,7 @@ class PgctlApp:
         want to leave the logger running (since poll-ready may still be writing
         log messages).
         """
-        dep_map = self.dependency_map
-        if dep_map:
-            ordered = self._services_in_stop_order()
-            phases = self._group_by_dependency_phase(ordered, reverse=True)
-            all_failed = []
-            for phase in phases:
-                phase_failed = self.__change_state(Stop, phase)
-                all_failed.extend(phase_failed)
-            failed = all_failed
-        else:
-            failed = self.__change_state(Stop, self.services)
+        failed = self.__change_state(Stop, self.services)
 
         if not with_log_running:
             failed_set = set(failed)
