@@ -18,6 +18,8 @@ from .config import Config
 from .configsearch import search_parent_directories
 from .debug import debug
 from .debug import trace
+from .dependencies import resolve_start_order
+from .dependencies import resolve_stop_order
 from .errors import CircularAliases
 from .errors import LockHeld
 from .errors import NoPlayground
@@ -68,6 +70,8 @@ PGCTL_DEFAULTS = frozendict({
     'environment_process_tracing': True,
     # enable embedded log viewer during start/stop?
     'embedded_log_viewer': True,
+    # service dependency ordering: {service_name: [list of services it depends on]}
+    'dependencies': frozendict(),
 })
 CHANNEL = '[pgctl]'
 
@@ -532,10 +536,61 @@ class PgctlApp:
 
         raise PgctlUserMessage(f'Some services failed to {state}: {commafy(failed)}')
 
+    @cached_property
+    def dependency_map(self):
+        deps = self.pgconf.get('dependencies', {})
+        return {k: tuple(v) if isinstance(v, list) else (v,) for k, v in deps.items()}
+
+    def _services_in_start_order(self):
+        return resolve_start_order(self.services, self.dependency_map)
+
+    def _services_in_stop_order(self):
+        return resolve_stop_order(self.services, self.dependency_map)
+
+    def _group_by_dependency_phase(self, ordered_services, reverse=False):
+        """Group services into phases where each phase's services have all
+        dependencies satisfied by prior phases.
+
+        Returns a list of lists of services.
+        """
+        dep_map = self.dependency_map
+        started = set()
+        phases = []
+        remaining = list(ordered_services)
+
+        while remaining:
+            phase = []
+            for service in list(remaining):
+                deps = set(dep_map.get(service.name, ()))
+                service_names_in_scope = {s.name for s in self.services}
+                relevant_deps = deps & service_names_in_scope
+                if relevant_deps <= started:
+                    phase.append(service)
+            if not phase:
+                phase = [remaining[0]]
+            for s in phase:
+                remaining.remove(s)
+                started.add(s.name)
+            phases.append(phase)
+
+        return phases
+
     def start(self):
         """Idempotent start of a service or group of services"""
-        failed = self.__change_state(Start, self.services)
-        return self.__show_failure('start', failed)
+        dep_map = self.dependency_map
+        if dep_map:
+            ordered = self._services_in_start_order()
+            phases = self._group_by_dependency_phase(ordered)
+            all_failed = []
+            for phase in phases:
+                failed = self.__change_state(Start, phase)
+                all_failed.extend(failed)
+                if failed:
+                    break
+            return self.__show_failure('start', all_failed)
+        else:
+            failed = self.__change_state(Start, self.services)
+            return self.__show_failure('start', failed)
 
     def stop(self, with_log_running=False):
         """Idempotent stop of a service or group of services
@@ -545,7 +600,17 @@ class PgctlApp:
         want to leave the logger running (since poll-ready may still be writing
         log messages).
         """
-        failed = self.__change_state(Stop, self.services)
+        dep_map = self.dependency_map
+        if dep_map:
+            ordered = self._services_in_stop_order()
+            phases = self._group_by_dependency_phase(ordered, reverse=True)
+            all_failed = []
+            for phase in phases:
+                phase_failed = self.__change_state(Stop, phase)
+                all_failed.extend(phase_failed)
+            failed = all_failed
+        else:
+            failed = self.__change_state(Stop, self.services)
 
         if not with_log_running:
             failed_set = set(failed)
